@@ -139,6 +139,14 @@
 		android,ramoops-dump-oops = <0x1>;
 		memory-region = <&ramoops_mem>;
 	};
+
+	qcom,bcl {
+		/delete-property/ qcom,bcl-hotplug-list;
+		/delete-property/ qcom,bcl-soc-hotplug-list;
+		qcom,ibat-monitor {
+			qcom,mitigation-freq-khz = <1132800>;
+		};
+	};
 };
 
 &i2c_8 {
