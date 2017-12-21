@@ -1044,7 +1044,7 @@ static void msm_vfe44_update_camif_state(struct vfe_device *vfe_dev,
 		msm_camera_io_w_mb(0x81, vfe_dev->vfe_base + 0x34);
 		msm_camera_io_w_mb(0x1, vfe_dev->vfe_base + 0x24);
 
-		msm_vfe44_config_irq(vfe_dev, 0xF7, 0x81,
+		msm_vfe44_config_irq(vfe_dev, 0x17, 0x81,
 				MSM_ISP_IRQ_ENABLE);
 		msm_camera_io_w_mb(0x140000, vfe_dev->vfe_base + 0x318);
 
@@ -1787,6 +1787,7 @@ struct msm_vfe_hardware_info vfe44_hw_info = {
 			.process_stats_irq = msm_isp_process_stats_irq,
 			.process_epoch_irq = msm_vfe44_process_epoch_irq,
 			.config_irq = msm_vfe44_config_irq,
+			.process_eof_irq = msm_isp47_process_eof_irq,
 		},
 		.axi_ops = {
 			.reload_wm = msm_vfe44_axi_reload_wm,
@@ -1859,6 +1860,7 @@ struct msm_vfe_hardware_info vfe44_hw_info = {
 			.get_pingpong_status = msm_vfe44_get_pingpong_status,
 			.update_cgc_override =
 				msm_vfe44_stats_update_cgc_override,
+			.enable_stats_wm = NULL,
 		},
 		.platform_ops = {
 			.get_platform_data = msm_vfe47_get_platform_data,
