@@ -911,12 +911,9 @@ void msm_isp_increment_frame_id(struct vfe_device *vfe_dev,
 				msm_isp_halt_send_error(vfe_dev,
 					ISP_EVENT_REG_UPDATE_MISSING);
 			}
+
 		} else
 			vfe_dev->axi_data.src_info[frame_src].frame_id++;
-	}
-	if (frame_src == VFE_PIX_0) {
-		vfe_dev->isp_page->kernel_sofid =
-			vfe_dev->axi_data.src_info[frame_src].frame_id;
 	}
 	sof_info = vfe_dev->axi_data.src_info[frame_src].
 		dual_hw_ms_info.sof_info;
@@ -1560,10 +1557,6 @@ void msm_isp_halt_send_error(struct vfe_device *vfe_dev, uint32_t event)
 		/* Recovery is already in Progress */
 		return;
 
-	/* if there are no active streams - do not start recovery */
-	if (!vfe_dev->axi_data.num_active_stream)
-		return;
-
 	if (ISP_EVENT_PING_PONG_MISMATCH == event &&
 		vfe_dev->axi_data.recovery_count < MAX_RECOVERY_THRESHOLD) {
 		vfe_dev->hw_info->vfe_ops.irq_ops.
@@ -1706,82 +1699,6 @@ static struct msm_isp_buffer *msm_isp_get_stream_buffer(
 	}
 
 	return buf;
-}
-
-int msm_isp_cfg_offline_ping_pong_address(struct vfe_device *vfe_dev,
-	struct msm_vfe_axi_stream *stream_info, uint32_t pingpong_status,
-	uint32_t buf_idx)
-{
-	int i, rc = 0;
-	struct msm_isp_buffer *buf = NULL;
-	uint32_t pingpong_bit;
-	uint32_t stream_idx = HANDLE_TO_IDX(stream_info->stream_handle);
-	uint32_t buffer_size_byte = 0;
-	int32_t word_per_line = 0;
-	dma_addr_t paddr;
-	uint32_t bufq_handle = 0;
-
-	if (stream_idx >= VFE_AXI_SRC_MAX) {
-		pr_err("%s: Invalid stream_idx", __func__);
-		return -EINVAL;
-	}
-
-	bufq_handle = stream_info->bufq_handle[VFE_BUF_QUEUE_DEFAULT];
-
-	if (!vfe_dev->is_split) {
-		rc = vfe_dev->buf_mgr->ops->get_buf_by_index(
-			vfe_dev->buf_mgr, bufq_handle, buf_idx, &buf);
-		if (rc < 0 || !buf) {
-			pr_err("%s: No fetch buffer rc= %d\n",
-				__func__, rc);
-			return -EINVAL;
-		}
-
-		if (buf->num_planes != stream_info->num_planes) {
-			pr_err("%s: Invalid buffer\n", __func__);
-			vfe_dev->buf_mgr->ops->put_buf(vfe_dev->buf_mgr,
-				bufq_handle, buf->buf_idx);
-			return -EINVAL;
-		}
-
-		pingpong_bit = ((pingpong_status >>
-			stream_info->wm[0]) & 0x1);
-
-		for (i = 0; i < stream_info->num_planes; i++) {
-			word_per_line = msm_isp_cal_word_per_line(
-				stream_info->output_format,
-				stream_info->plane_cfg[i].
-				output_stride);
-			if (word_per_line < 0) {
-				/* 0 means no prefetch*/
-				word_per_line = 0;
-				buffer_size_byte = 0;
-			} else {
-				buffer_size_byte = (word_per_line * 8 *
-					stream_info->plane_cfg[i].
-					output_scan_lines) -
-					stream_info->
-					plane_cfg[i].plane_addr_offset;
-			}
-			paddr = buf->mapped_info[i].paddr;
-
-			vfe_dev->hw_info->vfe_ops.axi_ops.
-				update_ping_pong_addr(
-				vfe_dev->vfe_base, stream_info->wm[i],
-				pingpong_bit, paddr +
-				stream_info->
-				plane_cfg[i].plane_addr_offset,
-				buffer_size_byte);
-
-			if (0 == i) {
-				stream_info->buf[!pingpong_bit] = buf;
-				buf->pingpong_bit = !pingpong_bit;
-			}
-			buf->state = MSM_ISP_BUFFER_STATE_DEQUEUED;
-		}
-	}
-	return rc;
-
 }
 
 static int msm_isp_cfg_ping_pong_address(struct vfe_device *vfe_dev,
@@ -2037,11 +1954,6 @@ static int msm_isp_process_done_buf(struct vfe_device *vfe_dev,
 	buf_event.u.buf_done.buf_idx = buf->buf_idx;
 	buf_event.u.buf_done.output_format =
 		stream_info->runtime_output_format;
-	if (vfe_dev->fetch_engine_info.is_busy &&
-		SRC_TO_INTF(stream_info->stream_src) == VFE_PIX_0) {
-		vfe_dev->fetch_engine_info.is_busy = 0;
-	}
-
 	if (stream_info->buf_divert &&
 		buf_src != MSM_ISP_BUFFER_SRC_SCRATCH) {
 
@@ -2195,31 +2107,25 @@ static void msm_isp_update_camif_output_count(
 		stream_info =
 			&axi_data->stream_info[
 			HANDLE_TO_IDX(stream_cfg_cmd->stream_handle[i])];
+		if (stream_info->stream_src >= RDI_INTF_0)
+			continue;
 		if (stream_info->stream_src == PIX_ENCODER ||
 			stream_info->stream_src == PIX_VIEWFINDER ||
 			stream_info->stream_src == PIX_VIDEO ||
 			stream_info->stream_src == IDEAL_RAW) {
 			if (stream_cfg_cmd->cmd == START_STREAM)
-				vfe_dev->axi_data.src_info[
-					SRC_TO_INTF(stream_info->stream_src)].
-						pix_stream_count++;
+				vfe_dev->axi_data.src_info[VFE_PIX_0].
+					pix_stream_count++;
 			else
-				vfe_dev->axi_data.src_info[
-					SRC_TO_INTF(stream_info->stream_src)].
-						pix_stream_count--;
-		} else if (stream_info->stream_src == CAMIF_RAW ||
-				stream_info->stream_src == RDI_INTF_0 ||
-				stream_info->stream_src == RDI_INTF_1 ||
-				stream_info->stream_src == RDI_INTF_2) {
+				vfe_dev->axi_data.src_info[VFE_PIX_0].
+					pix_stream_count--;
+		} else if (stream_info->stream_src == CAMIF_RAW) {
 			if (stream_cfg_cmd->cmd == START_STREAM)
-				vfe_dev->axi_data.src_info[
-					SRC_TO_INTF(stream_info->stream_src)].
-						raw_stream_count++;
+				vfe_dev->axi_data.src_info[VFE_PIX_0].
+					raw_stream_count++;
 			else
-				vfe_dev->axi_data.src_info[
-					SRC_TO_INTF(stream_info->stream_src)].
-						raw_stream_count--;
-
+				vfe_dev->axi_data.src_info[VFE_PIX_0].
+					raw_stream_count--;
 		}
 	}
 }
@@ -2850,18 +2756,7 @@ static int msm_isp_start_axi_stream(struct vfe_device *vfe_dev,
 	vfe_dev->hw_info->vfe_ops.axi_ops.reload_wm(vfe_dev,
 		vfe_dev->vfe_base, wm_reload_mask);
 	msm_isp_update_camif_output_count(vfe_dev, stream_cfg_cmd);
-	for (i = 0; i < VFE_SRC_MAX; i++) {
-		if ((vfe_dev->axi_data.src_info[i].pix_stream_count ||
-			vfe_dev->axi_data.src_info[i].raw_stream_count) &&
-			!vfe_dev->axi_data.src_info[i].flag) {
-			/*Configure UB*/
-			vfe_dev->hw_info->vfe_ops.axi_ops.cfg_ub(vfe_dev, i);
-			/*when start reset overflow state*/
-			atomic_set(&vfe_dev->error_info.overflow_state,
-				NO_OVERFLOW);
-			vfe_dev->axi_data.src_info[i].flag = 1;
-		}
-	}
+
 	if (camif_update == ENABLE_CAMIF) {
 		vfe_dev->hw_info->vfe_ops.core_ops.
 			update_camif_state(vfe_dev, camif_update);
@@ -2921,6 +2816,7 @@ static int msm_isp_stop_axi_stream(struct vfe_device *vfe_dev,
 			HANDLE_TO_IDX(stream_cfg_cmd->stream_handle[i])];
 		if (stream_info->state == AVAILABLE)
 			continue;
+
 		/* set ping pong address to scratch before stream stop */
 		spin_lock_irqsave(&stream_info->lock, flags);
 		msm_isp_cfg_stream_scratch(vfe_dev, stream_info, VFE_PING_FLAG);
@@ -2936,6 +2832,7 @@ static int msm_isp_stop_axi_stream(struct vfe_device *vfe_dev,
 				clear_wm_irq_mask(vfe_dev, stream_info);
 
 		stream_info->state = STOP_PENDING;
+
 		if (!halt && !ext_read &&
 			!(stream_info->stream_type == BURST_STREAM &&
 			stream_info->runtime_num_burst_capture == 0))
@@ -2967,8 +2864,6 @@ static int msm_isp_stop_axi_stream(struct vfe_device *vfe_dev,
 			if (intf >= VFE_RAW_0 &&
 				intf < VFE_SRC_MAX) {
 				vfe_dev->axi_data.src_info[intf].active = 0;
-				vfe_dev->axi_data.src_info[intf].flag = 0;
-
 			}
 		} else
 			src_mask |= (1 << intf);
@@ -3013,7 +2908,6 @@ static int msm_isp_stop_axi_stream(struct vfe_device *vfe_dev,
 		for (i = VFE_RAW_0; i < VFE_SRC_MAX; i++) {
 			if (src_mask & (1 << i)) {
 				vfe_dev->axi_data.src_info[i].active = 0;
-				vfe_dev->axi_data.src_info[i].flag = 0;
 			}
 		}
 	}
@@ -3078,6 +2972,14 @@ int msm_isp_cfg_axi_stream(struct vfe_device *vfe_dev, void *arg)
 	if (rc < 0) {
 		pr_err("%s: Invalid stream state\n", __func__);
 		return rc;
+	}
+
+	if (axi_data->num_active_stream == 0) {
+		/*Configure UB*/
+		vfe_dev->hw_info->vfe_ops.axi_ops.cfg_ub(vfe_dev);
+		/*when start reset overflow state*/
+		atomic_set(&vfe_dev->error_info.overflow_state,
+			NO_OVERFLOW);
 	}
 	msm_isp_get_camif_update_state_and_halt(vfe_dev, stream_cfg_cmd,
 		&camif_update, &halt);
@@ -3301,6 +3203,7 @@ static int msm_isp_request_frame(struct vfe_device *vfe_dev,
 	stream_cfg_cmd.frame_skip_pattern = NO_SKIP;
 	stream_cfg_cmd.init_frame_drop = 0;
 	stream_cfg_cmd.burst_count = stream_info->request_q_cnt;
+
 	if (stream_info->undelivered_request_cnt == 1) {
 		rc = msm_isp_cfg_ping_pong_address(vfe_dev, stream_info,
 			VFE_PING_FLAG, 0);
@@ -3670,24 +3573,6 @@ int msm_isp_update_axi_stream(struct vfe_device *vfe_dev, void *arg)
 		}
 		break;
 	}
-	case UPDATE_STREAM_OFFLINE_AXI_CONFIG: {
-		for (i = 0; i < update_cmd->num_streams; i++) {
-			update_info =
-				(struct msm_vfe_axi_stream_cfg_update_info *)
-				&update_cmd->update_info[i];
-			stream_info = &axi_data->stream_info[HANDLE_TO_IDX(
-				update_info->stream_handle)];
-			for (j = 0; j < stream_info->num_planes; j++) {
-				stream_info->plane_cfg[j] =
-					update_info->plane_cfg[j];
-			}
-			for (j = 0; j < stream_info->num_planes; j++) {
-				vfe_dev->hw_info->vfe_ops.axi_ops.
-					cfg_wm_reg(vfe_dev, stream_info, j);
-			}
-		}
-		break;
-	}
 	default:
 		pr_err("%s: Invalid update type\n", __func__);
 		return -EINVAL;
@@ -3905,6 +3790,7 @@ void msm_isp_process_axi_irq(struct vfe_device *vfe_dev,
 			}
 			stream_idx = HANDLE_TO_IDX(comp_info->stream_handle);
 			stream_info = &axi_data->stream_info[stream_idx];
+
 			msm_isp_process_axi_irq_stream(vfe_dev, stream_info,
 						pingpong_status, ts);
 
