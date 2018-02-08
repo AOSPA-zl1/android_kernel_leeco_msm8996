@@ -1,0 +1,109 @@
+# Configuration menu for LeEco devices
+menu "LeEco device configuration"
+
+config MACH_LEECO
+	bool "Kernel support for LeEco devices"
+	depends on ARCH_MSM8996
+	select USB_CCLOGIC
+	select MSM_I2C_FLASH
+	select LETVS_CLASS
+	default n
+	help
+	  Once selected, this will apply common Kernel changes
+	  from LeEco at all levels. Device specific changes aren't
+	  covered, you need to select them manually.
+
+	  The following drivers will be selected in Kernel:
+
+	  * USB CC Logic -> USB Type-C
+	  * USB Cypress -> USB Type-C
+	  * MSM I2C Flash -> Camera's Flash
+	  * LeTV Class -> Probe Helper
+
+	  This can be used to apply patches from LeEco without touching
+	  other devices or the general purpose of the Linux Kernel.
+
+	  If unsure, say N.
+
+config MACH_LEECO_OEM
+	depends on MACH_LEECO
+	bool "OEM extensions for LeEco devices"
+	help
+	  Once selected, this option will bring-in OEM changes in Kernel source code, they
+	  aren't usually needed.
+
+	  If unsure, say Y here to avoid issues when running stock Android firmware. Otherwise,
+	  say N.
+
+config MACH_LEECO_DEBUG
+	depends on MACH_LEECO
+	bool "Debugging conditionals for LeEco devices"
+	help
+	  Once selected, this option will enable most OEM debugging code in Kernel, this is
+	  not needed unless you're debugging changes on those OEM drivers.
+
+	  If unsure, say N.
+
+config MACH_LEECO_PD
+	depends on MACH_LEECO
+	select USB_CYCCG
+	bool "Support USB PD control protocol for LeEco devices"
+	help
+	  Once selected, this option will enable support for LeEco's PD infrastructure. This
+	  new USB infrastructure is a dependency for some USB controllers like the ANX7418,
+	  it will be available as 'le_ab' power supply type in SMB charger interface.
+
+	  This will select the CYCCG USB driver as a dependency to poll temperature from the
+	  USB controller.
+
+	  If unsure, say N.
+
+config MACH_LEECO_ZL1
+	bool "Kernel support for the Le Pro 3 (ZL1)"
+	depends on MACH_LEECO
+	select BACKLIGHT_LM3697
+	select INPUT_DRV2604L_HAPTICS
+	select INPUT_GP5XX8
+	select IR_MAXQ616
+	select SND_SOC_MAX98927
+	select TOUCHSCREEN_FTS
+	select TOUCHSCREEN_SYNAPTICS_DSX_LETV
+	select TOUCHSCREEN_SYNAPTICS_DSX_CORE_LETV
+	select TOUCHSCREEN_SYNAPTICS_DSX_RMI_DEV_LETV
+	select TOUCHSCREEN_SYNAPTICS_DSX_FW_UPDATE_LETV
+	select TOUCHSCREEN_SYNAPTICS_DSX_TEST_REPORTING_LETV
+	select USB_CCLOGIC_PER30216
+	select USB_CCLOGIC_TUSB320
+	help
+	  Once selected, barebones Le Pro 3 tuning and drivers will take effect.
+
+	  The following drivers will be selected in Kernel:
+
+	  * LM3697 -> Backlight
+	  * Goodix 5208 -> Fingerprint Sensor
+	  * Focaltech FTS -> Touchsreen
+	  * TI DRV2604L -> Vibrator
+	  * MAXQ616 -> Infrared Remote Control
+	  * Maxim MAX98927 -> Smart PA
+	  * Custom ZL1 MBHC -> Audio Socket
+	  * Pericom 30216C -> USB Type-C
+	  * Texas Instruments TUSB320 -> USB Type-C Audio
+
+	  OEM changes such as custom init, cpufreq modifications, VR support and proprietary
+	  sound controllers aren't covered in this option.
+	  Thus, if you want those OEM changes you'll need to select the next
+	  option right down below.
+
+	  If unsure, you're the expert. Otherwise, always say N.
+
+config MACH_LEECO_ZL1_OEM
+	depends on MACH_LEECO_ZL1
+	bool "OEM extensions for the Le Pro 3 (ZL1)"
+	help
+	  Once selected, this option will bring-in OEM changes in Kernel source code, they
+	  aren't usually needed.
+
+	  If unsure, say Y here to avoid issues when running stock Android firmware. Otherwise,
+	  say N.
+
+endmenu

@@ -473,6 +473,18 @@ struct mdss_dsi_ctrl_pdata {
 	u32 *status_value;
 	unsigned char *return_buf;
 	u32 groups; /* several alternative values to compare */
+#ifdef CONFIG_MACH_LEECO
+	struct dsi_panel_cmds status_cmds1;
+	u32 status_cmds_rlen1;
+	u32 *status_value1;
+	struct dsi_panel_cmds status_on_cmds1;
+	bool enable_reg_check1;
+	struct dsi_panel_cmds status_cmds2;
+	u32 status_cmds_rlen2;
+	u32 *status_value2;
+	struct dsi_panel_cmds status_on_cmds2;
+	bool enable_reg_check2;
+#endif
 	u32 status_error_count;
 	u32 max_status_error_count;
 
