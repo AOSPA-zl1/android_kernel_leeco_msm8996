@@ -43,12 +43,21 @@ static struct device_attribute power_supply_attrs[];
 static ssize_t power_supply_show_property(struct device *dev,
 					  struct device_attribute *attr,
 					  char *buf) {
+#ifdef CONFIG_MACH_LEECO_PD
+	static const char * const type_text[] = {
+		"Unknown", "Battery", "UPS", "Mains", "USB", "USB_DCP",
+		"USB_CDP", "USB_ACA", "USB_HVDCP", "USB_HVDCP_3", "USB_PD",
+		"Wireless", "USB_FLOAT", "BMS", "Parallel", "Main", "Wipower",
+		"TYPEC", "TYPEC_UFP", "TYPEC_DFP", "LE_AB"
+	};
+#else
 	static const char * const type_text[] = {
 		"Unknown", "Battery", "UPS", "Mains", "USB", "USB_DCP",
 		"USB_CDP", "USB_ACA", "USB_HVDCP", "USB_HVDCP_3", "USB_PD",
 		"Wireless", "USB_FLOAT", "BMS", "Parallel", "Main", "Wipower",
 		"TYPEC", "TYPEC_UFP", "TYPEC_DFP"
 	};
+#endif
 	static char *status_text[] = {
 		"Unknown", "Charging", "Discharging", "Not charging", "Full"
 	};
@@ -251,6 +260,9 @@ static struct device_attribute power_supply_attrs[] = {
 	POWER_SUPPLY_ATTR(temp_cool),
 	POWER_SUPPLY_ATTR(temp_warm),
 	POWER_SUPPLY_ATTR(system_temp_level),
+#ifdef CONFIG_MACH_LEECO_ZL1
+	POWER_SUPPLY_ATTR(system_scn),
+#endif
 	POWER_SUPPLY_ATTR(resistance),
 	POWER_SUPPLY_ATTR(resistance_capacitive),
 	POWER_SUPPLY_ATTR(resistance_id),
@@ -285,6 +297,13 @@ static struct device_attribute power_supply_attrs[] = {
 	POWER_SUPPLY_ATTR(enable_jeita_detection),
 	POWER_SUPPLY_ATTR(battery_info),
 	POWER_SUPPLY_ATTR(battery_info_id),
+#ifdef CONFIG_MACH_LEECO_PD
+	POWER_SUPPLY_ATTR(le_usbin_temp),
+	POWER_SUPPLY_ATTR(le_vph_voltage),
+	POWER_SUPPLY_ATTR(le_usb_temp_level),
+	POWER_SUPPLY_ATTR(le_black_call_mode),
+	POWER_SUPPLY_ATTR(le_quick_charge_mode),
+#endif
 	POWER_SUPPLY_ATTR(typec_cc_orientation),
 	POWER_SUPPLY_ATTR(typec_power_role),
 	POWER_SUPPLY_ATTR(pd_allowed),
