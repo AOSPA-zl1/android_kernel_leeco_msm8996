@@ -353,6 +353,11 @@ config ARCH_MSM8994_V1_TLBI_WA
 
 endmenu
 
+#
+# Inherit OEM device configuration from ARM folder.
+#
+source "arch/arm/mach-leeco/Kconfig"
+
 menu "Bus support"
 
 config ARM_AMBA

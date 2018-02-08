@@ -641,6 +641,10 @@ static void mdss_dsi_panel_switch_mode(struct mdss_panel_data *pdata,
 		mdss_dsi_panel_dsc_pps_send(ctrl_pdata, &pdata->panel_info);
 }
 
+#ifdef CONFIG_BACKLIGHT_LM3697
+extern int lm3697_bl_set(int bl_level);
+#endif
+
 static void mdss_dsi_panel_bl_ctrl(struct mdss_panel_data *pdata,
 							u32 bl_level)
 {
@@ -669,6 +673,9 @@ static void mdss_dsi_panel_bl_ctrl(struct mdss_panel_data *pdata,
 		led_trigger_event(bl_led_trigger, bl_level);
 		break;
 	case BL_PWM:
+#ifdef CONFIG_BACKLIGHT_LM3697
+		lm3697_bl_set(bl_level);
+#endif
 		mdss_dsi_panel_bklt_pwm(ctrl_pdata, bl_level);
 		break;
 	case BL_DCS_CMD:
@@ -1763,6 +1770,104 @@ static void mdss_dsi_parse_esd_params(struct device_node *np,
 			"qcom,mdss-dsi-panel-status-command",
 				"qcom,mdss-dsi-panel-status-command-state");
 
+#ifdef CONFIG_MACH_LEECO
+	rc = of_property_read_string(np,
+			"qcom,mdss-dsi-panel-status-check-mode1", &string);
+	if (!rc)
+	{
+		if (!strcmp(string, "reg_read"))
+		{
+			ctrl->enable_reg_check1 = true;
+			mdss_dsi_parse_dcs_cmds(np, &ctrl->status_cmds1,
+					"qcom,mdss-dsi-panel-status-command1",
+						"qcom,mdss-dsi-panel-status-check-command-mode1");
+
+			rc = of_property_read_u32(np, "qcom,mdss-dsi-panel-status-read-length1",
+				&tmp);
+			ctrl->status_cmds_rlen1 = (!rc ? tmp : 1);
+
+			ctrl->status_value1 = kzalloc(sizeof(u32) * ctrl->status_cmds_rlen1,
+						GFP_KERNEL);
+			if (!ctrl->status_value1) {
+				pr_err("%s: Error allocating memory for status buffer\n",
+					__func__);
+				ctrl->enable_reg_check1 =  false;
+				return;
+			}
+
+			data = of_find_property(np, "qcom,mdss-dsi-panel-status-value1", &tmp);
+			tmp /= sizeof(u32);
+			if (!data || (tmp != ctrl->status_cmds_rlen1)) {
+				pr_debug("%s: Panel status values not found\n", __func__);
+				memset(ctrl->status_value1, 0, ctrl->status_cmds_rlen1);
+				ctrl->enable_reg_check1 =  false;
+			} else {
+				rc = of_property_read_u32_array(np,
+					"qcom,mdss-dsi-panel-status-value1",
+					ctrl->status_value1, tmp);
+				if (rc) {
+					pr_debug("%s: Error reading panel status values\n",
+							__func__);
+					memset(ctrl->status_value1, 0, ctrl->status_cmds_rlen1);
+					ctrl->enable_reg_check1 =  false;
+				}
+			}
+
+			mdss_dsi_parse_dcs_cmds(np, &ctrl->status_on_cmds1,
+			"qcom,mdss-dsi-panel-status-on-command1",
+			"qcom,mdss-dsi-panel-status-check-command-mode1");
+		}
+	}
+
+	rc = of_property_read_string(np,
+			"qcom,mdss-dsi-panel-status-check-mode2", &string);
+	if (!rc)
+	{
+		if (!strcmp(string, "reg_read"))
+		{
+			ctrl->enable_reg_check2 = true;
+			mdss_dsi_parse_dcs_cmds(np, &ctrl->status_cmds2,
+				"qcom,mdss-dsi-panel-status-command2",
+				"qcom,mdss-dsi-panel-status-check-command-mode2");
+
+			rc = of_property_read_u32(np, "qcom,mdss-dsi-panel-status-read-length2",
+				&tmp);
+			ctrl->status_cmds_rlen2 = (!rc ? tmp : 1);
+
+			ctrl->status_value2 = kzalloc(sizeof(u32) * ctrl->status_cmds_rlen2,
+								GFP_KERNEL);
+			if (!ctrl->status_value2) {
+						pr_err("%s: Error allocating memory for status buffer\n",
+							__func__);
+				ctrl->enable_reg_check2 = false;
+				return;
+			}
+
+			data = of_find_property(np, "qcom,mdss-dsi-panel-status-value2", &tmp);
+			tmp /= sizeof(u32);
+			if (!data || (tmp != ctrl->status_cmds_rlen2)) {
+				pr_debug("%s: Panel status values not found\n", __func__);
+				memset(ctrl->status_value2, 0, ctrl->status_cmds_rlen2);
+				ctrl->enable_reg_check2 = false;
+			} else {
+				rc = of_property_read_u32_array(np,
+					"qcom,mdss-dsi-panel-status-value2",
+					ctrl->status_value2, tmp);
+				if (rc) {
+					pr_debug("%s: Error reading panel status values\n",
+						__func__);
+					memset(ctrl->status_value2, 0, ctrl->status_cmds_rlen2);
+					ctrl->enable_reg_check2 = false;
+					}
+				}
+
+			mdss_dsi_parse_dcs_cmds(np, &ctrl->status_on_cmds2,
+				"qcom,mdss-dsi-panel-status-on-command2",
+				"qcom,mdss-dsi-panel-status-check-command-mode2");
+		}
+	}
+#endif
+
 	rc = of_property_read_u32(np, "qcom,mdss-dsi-panel-max-error-count",
 		&tmp);
 	ctrl->max_status_error_count = (!rc ? tmp : 0);
@@ -1822,6 +1927,10 @@ error1:
 	kfree(ctrl->status_valid_params);
 	kfree(ctrl->status_cmds_rlen);
 error:
+#ifdef CONFIG_MACH_LEECO
+	kfree(ctrl->status_value1);
+	kfree(ctrl->status_value2);
+#endif
 	pinfo->esd_check_enabled = false;
 }
 
