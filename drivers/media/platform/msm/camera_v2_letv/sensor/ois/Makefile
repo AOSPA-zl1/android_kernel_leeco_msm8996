@@ -1,0 +1,12 @@
+ccflags-y += -Idrivers/media/platform/msm/camera_v2_letv
+ccflags-y += -Idrivers/media/platform/msm/camera_v2_letv/common
+ccflags-y += -Idrivers/media/platform/msm/camera_v2_letv/sensor/
+ccflags-y += -Idrivers/media/platform/msm/camera_v2_letv/sensor/io
+ccflags-y += -Idrivers/media/platform/msm/camera_v2_letv/sensor/cci
+obj-$(CONFIG_MSMB_CAMERA_LETV) += bu24218/
+obj-$(CONFIG_MSMB_CAMERA_LETV) += msm_ois.o
+obj-$(CONFIG_MSMB_CAMERA_LETV) += ois_interface.o
+obj-$(CONFIG_MSMB_CAMERA_LETV) += OisIni.o
+obj-$(CONFIG_MSMB_CAMERA_LETV) += OisCmd.o
+obj-$(CONFIG_MSMB_CAMERA_LETV) += OIS_user.o
+obj-$(CONFIG_MSMB_CAMERA_LETV) += OIS_func.o
