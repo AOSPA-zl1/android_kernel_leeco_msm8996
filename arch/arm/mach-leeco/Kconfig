@@ -7,6 +7,7 @@ config MACH_LEECO
 	select USB_CCLOGIC
 	select MSM_I2C_FLASH
 	select LETVS_CLASS
+	select MSMB_CAMERA_LETV
 	default n
 	help
 	  Once selected, this will apply common Kernel changes
@@ -19,6 +20,7 @@ config MACH_LEECO
 	  * USB Cypress -> USB Type-C
 	  * MSM I2C Flash -> Camera's Flash
 	  * LeTV Class -> Probe Helper
+	  * Camera LeTV -> LeEco MSM Camera Driver
 
 	  This can be used to apply patches from LeEco without touching
 	  other devices or the general purpose of the Linux Kernel.
