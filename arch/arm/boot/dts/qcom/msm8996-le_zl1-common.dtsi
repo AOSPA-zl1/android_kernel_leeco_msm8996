@@ -10,6 +10,8 @@
  * GNU General Public License for more details.
  */
 
+/delete-node/ &firmware;
+
 &peripheral_mem {
 	/delete-property/ reg;
 	reg = <0 0x8ea00000 0 0x2b00000>;
@@ -29,9 +31,40 @@
 			label = "ramoops_mem";
 		};
 	};
+
+	firmware: firmware {
+		android {
+			compatible = "android,firmware";
+			fstab {
+				compatible = "android,fstab";
+				 system {
+					compatible = "android,system";
+					dev = "/dev/block/platform/soc/624000.ufshc/by-name/system";
+					type = "ext4";
+					mnt_flags = "ro,barrier=1,discard";
+					fsmgr_flags = "wait";
+					status = "ok";
+				};
+
+			};
+		};
+	};
 };
 
 &soc {
+	ramoops {
+		compatible = "ramoops";
+		status = "ok";
+		android,ramoops-buffer-start = <0x91500000>;
+		android,ramoops-buffer-size =  <0x100000>;
+		android,ramoops-console-size = <0x60000>;
+		android,ramoops-record-size = <0x10000>;
+		android,ramoops-ftrace-size = <0x10000>;
+		android,ramoops-pmsg-size = <0x20000>;
+		android,ramoops-dump-oops = <0x1>;
+		memory-region = <&ramoops_mem>;
+	};
+
 	i2c_9: i2c@75b7000 { /* BLSP2 QUP2 */
 		compatible = "qcom,i2c-msm-v2";
 		#address-cells = <1>;
