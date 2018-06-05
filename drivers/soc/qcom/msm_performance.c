@@ -477,6 +477,11 @@ static int set_cpu_max_freq(const char *buf, const struct kernel_param *kp)
 		if (cpu > (num_present_cpus() - 1))
 			return -EINVAL;
 
+#ifdef CONFIG_MACH_LEECO_ZL1
+		if ((cpu == 0 || cpu == 1) && val == 1593600)
+			val = 2188800;
+#endif
+
 		i_cpu_stats = &per_cpu(cpu_stats, cpu);
 
 		i_cpu_stats->max = val;
