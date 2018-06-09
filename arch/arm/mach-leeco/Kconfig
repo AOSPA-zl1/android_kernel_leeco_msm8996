@@ -8,6 +8,7 @@ config MACH_LEECO
 	select MSM_I2C_FLASH
 	select LETVS_CLASS
 	select MSMB_CAMERA_LETV
+	select NFC
 	default n
 	help
 	  Once selected, this will apply common Kernel changes
@@ -21,6 +22,7 @@ config MACH_LEECO
 	  * MSM I2C Flash -> Camera's Flash
 	  * LeTV Class -> Probe Helper
 	  * Camera LeTV -> LeEco MSM Camera Driver
+	  * NFC -> Common NFC Kernel Dependency
 
 	  This can be used to apply patches from LeEco without touching
 	  other devices or the general purpose of the Linux Kernel.
@@ -76,6 +78,7 @@ config MACH_LEECO_ZL1
 	select TOUCHSCREEN_SYNAPTICS_DSX_TEST_REPORTING_LETV
 	select USB_CCLOGIC_PER30216
 	select USB_CCLOGIC_TUSB320
+	select NFC_PN544_OP
 	help
 	  Once selected, barebones Le Pro 3 tuning and drivers will take effect.
 
@@ -90,6 +93,7 @@ config MACH_LEECO_ZL1
 	  * Custom ZL1 MBHC -> Audio Socket
 	  * Pericom 30216C -> USB Type-C
 	  * Texas Instruments TUSB320 -> USB Type-C Audio
+	  * PN544 -> NFC (Oneplus Version)
 
 	  OEM changes such as custom init, cpufreq modifications, VR support and proprietary
 	  sound controllers aren't covered in this option.
