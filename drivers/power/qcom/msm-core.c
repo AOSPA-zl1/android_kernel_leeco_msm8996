@@ -17,7 +17,6 @@
 #include <linux/fs.h>
 #include <linux/init.h>
 #include <linux/io.h>
-#include <linux/kthread.h>
 #include <linux/kernel.h>
 #include <linux/miscdevice.h>
 #include <linux/module.h>
@@ -50,6 +49,8 @@
 #define MAX_NUM_OF_CLUSTERS 2
 #define NUM_OF_CORNERS 10
 #define DEFAULT_SCALING_FACTOR 1
+
+#define SAMPLE_MAX_TIMEOUT_MS 1000
 
 #define ALLOCATE_2D_ARRAY(type)\
 static type **allocate_2d_array_##type(int idx)\
@@ -97,26 +98,19 @@ struct cpu_static_info {
 };
 
 static DEFINE_MUTEX(policy_update_mutex);
-static DEFINE_MUTEX(kthread_update_mutex);
+static DEFINE_MUTEX(suspend_update_mutex);
 static DEFINE_SPINLOCK(update_lock);
-#ifdef ENABLE_TSENS_SAMPLING
 static struct delayed_work sampling_work;
-static struct completion sampling_completion;
-static struct task_struct *sampling_task;
+static struct workqueue_struct *msm_core_wq;
 static int low_hyst_temp;
 static int high_hyst_temp;
-static uint32_t scaling_factor;
-#endif
 static struct platform_device *msm_core_pdev;
 static struct cpu_activity_info activity[NR_CPUS];
 DEFINE_PER_CPU(struct cpu_pstate_pwr *, ptable);
 static struct cpu_pwr_stats cpu_stats[NR_CPUS];
+static uint32_t scaling_factor;
 ALLOCATE_2D_ARRAY(uint32_t);
 
-/*
- * Userspace checks for the presence of poll_ms and disabled, so keep them
- * even when ENABLE_TSENS_SAMPLING isn't used.
- */
 static int poll_ms;
 module_param_named(polling_interval, poll_ms, int,
 		S_IRUGO | S_IWUSR | S_IWGRP);
@@ -124,12 +118,13 @@ module_param_named(polling_interval, poll_ms, int,
 static int disabled;
 module_param_named(disabled, disabled, int,
 		S_IRUGO | S_IWUSR | S_IWGRP);
-#ifdef ENABLE_TSENS_SAMPLING
 static bool in_suspend;
 static bool activate_power_table;
 static int max_throttling_temp = 80; /* in C */
 module_param_named(throttling_temp, max_throttling_temp, int,
 		S_IRUGO | S_IWUSR | S_IWGRP);
+
+static unsigned long forced_timeout;
 
 /*
  * Cannot be called from an interrupt context
@@ -184,9 +179,23 @@ static void set_threshold(struct cpu_activity_info *cpu_node)
 		&cpu_node->low_threshold);
 }
 
-static void samplequeue_handle(struct work_struct *work)
+static inline bool should_run_resampling(void)
 {
-	complete(&sampling_completion);
+	if (!mutex_is_locked(&suspend_update_mutex) && !in_suspend)
+		return true;
+	else
+		return false;
+}
+
+static inline void schedule_sampling(void)
+{
+	if (should_run_resampling()) {
+		forced_timeout = jiffies + msecs_to_jiffies(SAMPLE_MAX_TIMEOUT_MS);
+		if (delayed_work_pending(&sampling_work))
+			cancel_delayed_work(&sampling_work);
+		queue_delayed_work(msm_core_wq, &sampling_work,
+					msecs_to_jiffies(0));
+	}
 }
 
 /* May be called from an interrupt context */
@@ -201,9 +210,11 @@ static void core_temp_notify(enum thermal_trip_type type,
 
 	cpu_node->temp = temp / scaling_factor;
 
-	complete(&sampling_completion);
+	/* Schedule resampling if the forced timeout is over */
+	if (time_after(jiffies, forced_timeout)) {
+		schedule_sampling();
+	}
 }
-#endif
 
 static void repopulate_stats(int cpu)
 {
@@ -232,8 +243,7 @@ static void repopulate_stats(int cpu)
 
 void trigger_cpu_pwr_stats_calc(void)
 {
-#ifdef ENABLE_TSENS_SAMPLING
-	int cpu;
+	int cpu, rc;
 	static long prev_temp[NR_CPUS];
 	struct cpu_activity_info *cpu_node;
 	long temp;
@@ -249,7 +259,11 @@ void trigger_cpu_pwr_stats_calc(void)
 			continue;
 
 		if (cpu_node->temp == prev_temp[cpu]) {
-			sensor_get_temp(cpu_node->sensor_id, &temp);
+			rc = sensor_get_temp(cpu_node->sensor_id, &temp);
+			if (rc) {
+				pr_err("msm-core: The sensor reported invalid data!");
+				temp = DEFAULT_TEMP;
+			}
 			cpu_node->temp = temp / scaling_factor;
 		}
 
@@ -264,7 +278,6 @@ void trigger_cpu_pwr_stats_calc(void)
 			repopulate_stats(cpu);
 	}
 	spin_unlock(&update_lock);
-#endif
 }
 EXPORT_SYMBOL(trigger_cpu_pwr_stats_calc);
 
@@ -310,47 +323,42 @@ static void update_related_freq_table(struct cpufreq_policy *policy)
 	}
 }
 
-#ifdef ENABLE_TSENS_SAMPLING
-static __ref int do_sampling(void *data)
+static inline void do_sampling(void)
 {
 	int cpu;
 	struct cpu_activity_info *cpu_node;
 	static int prev_temp[NR_CPUS];
 
-	while (!kthread_should_stop()) {
-		wait_for_completion(&sampling_completion);
-		cancel_delayed_work(&sampling_work);
+	if (!should_run_resampling())
+		return;
 
-		mutex_lock(&kthread_update_mutex);
-		if (in_suspend)
-			goto unlock;
+	mutex_lock(&suspend_update_mutex);
+	trigger_cpu_pwr_stats_calc();
 
-		trigger_cpu_pwr_stats_calc();
-
-		for_each_online_cpu(cpu) {
-			cpu_node = &activity[cpu];
-			if (prev_temp[cpu] != cpu_node->temp) {
-				prev_temp[cpu] = cpu_node->temp;
-				set_threshold(cpu_node);
-				trace_temp_threshold(cpu, cpu_node->temp,
-					cpu_node->hi_threshold.temp /
-					scaling_factor,
-					cpu_node->low_threshold.temp /
-					scaling_factor);
-			}
+	for_each_online_cpu(cpu) {
+		cpu_node = &activity[cpu];
+		if (prev_temp[cpu] != cpu_node->temp) {
+			prev_temp[cpu] = cpu_node->temp;
+			set_threshold(cpu_node);
+			trace_temp_threshold(cpu, cpu_node->temp,
+				cpu_node->hi_threshold.temp /
+				scaling_factor,
+				cpu_node->low_threshold.temp /
+				scaling_factor);
 		}
-		if (!poll_ms)
-			goto unlock;
-
-		queue_delayed_work(system_power_efficient_wq,
-			&sampling_work,
-			msecs_to_jiffies(poll_ms));
-unlock:
-		mutex_unlock(&kthread_update_mutex);
 	}
-	return 0;
+		mutex_unlock(&suspend_update_mutex);
 }
-#endif
+
+static void samplequeue_handle(struct work_struct *work)
+{
+	/* Prevent race with core_temp notification by using SAMPLE_MAX_TIMEOUT_MS */
+	forced_timeout = jiffies + msecs_to_jiffies(SAMPLE_MAX_TIMEOUT_MS);
+	do_sampling();
+	forced_timeout = jiffies + msecs_to_jiffies(poll_ms / 2);
+	queue_delayed_work(msm_core_wq, &sampling_work,
+				msecs_to_jiffies(poll_ms));
+}
 
 static void clear_static_power(struct cpu_static_info *sp)
 {
@@ -419,10 +427,9 @@ static int update_userspace_power(struct sched_params __user *argp)
 	if (!sp)
 		return -ENOMEM;
 
-	mutex_lock(&policy_update_mutex);
+
 	sp->power = allocate_2d_array_uint32_t(node->sp->num_of_freqs);
 	if (IS_ERR_OR_NULL(sp->power)) {
-		mutex_unlock(&policy_update_mutex);
 		ret = PTR_ERR(sp->power);
 		kfree(sp);
 		return ret;
@@ -466,7 +473,6 @@ static int update_userspace_power(struct sched_params __user *argp)
 		}
 	}
 	spin_unlock(&update_lock);
-	mutex_unlock(&policy_update_mutex);
 
 	for_each_possible_cpu(cpu) {
 		if (!pdata_valid[cpu])
@@ -476,13 +482,10 @@ static int update_userspace_power(struct sched_params __user *argp)
 			&msm_core_stats_notifier_list, cpu, NULL);
 	}
 
-#ifdef ENABLE_TSENS_SAMPLING
 	activate_power_table = true;
-#endif
 	return 0;
 
 failed:
-	mutex_unlock(&policy_update_mutex);
 	for (i = 0; i < TEMP_DATA_POINTS; i++)
 		kfree(sp->power[i]);
 	kfree(sp->power);
@@ -570,7 +573,6 @@ static int msm_core_release(struct inode *inode, struct file *file)
 	return 0;
 }
 
-#ifdef ENABLE_TSENS_SAMPLING
 static inline void init_sens_threshold(struct sensor_threshold *threshold,
 		enum thermal_trip_type trip, long temp,
 		void *data)
@@ -580,7 +582,6 @@ static inline void init_sens_threshold(struct sensor_threshold *threshold,
 	threshold->data = data;
 	threshold->notify = (void *)core_temp_notify;
 }
-#endif
 
 static int msm_core_stats_init(struct device *dev, int cpu)
 {
@@ -608,19 +609,14 @@ static int msm_core_stats_init(struct device *dev, int cpu)
 	return 0;
 }
 
-#ifdef ENABLE_TSENS_SAMPLING
 static int msm_core_task_init(struct device *dev)
 {
-	init_completion(&sampling_completion);
-	sampling_task = kthread_run(do_sampling, NULL, "msm-core:sampling");
-	if (IS_ERR(sampling_task)) {
-		pr_err("Failed to create do_sampling err: %ld\n",
-				PTR_ERR(sampling_task));
-		return PTR_ERR(sampling_task);
-	}
+	msm_core_wq = alloc_workqueue("msm-core_wq", WQ_HIGHPRI, 0);
+	if (!msm_core_wq)
+		return -EFAULT;
+
 	return 0;
 }
-#endif
 
 struct cpu_pwr_stats *get_cpu_pwr_stats(void)
 {
@@ -718,7 +714,6 @@ static int msm_core_dyn_pwr_init(struct platform_device *pdev,
 	return ret;
 }
 
-#ifdef ENABLE_TSENS_SAMPLING
 static int msm_core_tsens_init(struct device_node *node, int cpu)
 {
 	int ret = 0;
@@ -783,7 +778,6 @@ static int msm_core_tsens_init(struct device_node *node, int cpu)
 
 	return ret;
 }
-#endif
 
 static int msm_core_mpidr_init(struct device_node *phandle)
 {
@@ -838,28 +832,27 @@ struct notifier_block cpu_policy = {
 	.notifier_call = msm_core_cpu_policy_handler
 };
 
-#ifdef ENABLE_TSENS_SAMPLING
 static int system_suspend_handler(struct notifier_block *nb,
 				unsigned long val, void *data)
 {
 	int cpu;
 
-	mutex_lock(&kthread_update_mutex);
+	mutex_lock(&suspend_update_mutex);
 	switch (val) {
 	case PM_POST_HIBERNATION:
 	case PM_POST_SUSPEND:
 	case PM_POST_RESTORE:
 		/*
-		 * Set completion event to read temperature and repopulate
+		 * Schedule resampling to read temperature and repopulate
 		 * stats
 		 */
 		in_suspend = 0;
-		complete(&sampling_completion);
+		schedule_sampling();
 		break;
 	case PM_HIBERNATION_PREPARE:
 	case PM_SUSPEND_PREPARE:
 		/*
-		 * cancel delayed work to be able to restart immediately
+		 * cancel work to be able to restart immediately
 		 * after system resume
 		 */
 		in_suspend = 1;
@@ -882,11 +875,10 @@ static int system_suspend_handler(struct notifier_block *nb,
 	default:
 		break;
 	}
-	mutex_unlock(&kthread_update_mutex);
+	mutex_unlock(&suspend_update_mutex);
 
 	return NOTIFY_OK;
 }
-#endif
 
 static int msm_core_freq_init(void)
 {
@@ -920,10 +912,8 @@ static int msm_core_params_init(struct platform_device *pdev)
 	int ret = 0;
 	unsigned long cpu = 0;
 	struct device_node *child_node = NULL;
-#ifdef ENABLE_TSENS_SAMPLING
 	struct device_node *ea_node = NULL;
 	char *key = NULL;
-#endif
 	int mpidr;
 
 	for_each_possible_cpu(cpu) {
@@ -941,7 +931,6 @@ static int msm_core_params_init(struct platform_device *pdev)
 
 		activity[cpu].mpidr = mpidr;
 
-#ifdef ENABLE_TSENS_SAMPLING
 		key = "qcom,ea";
 		ea_node = of_parse_phandle(child_node, key, 0);
 		if (!ea_node) {
@@ -953,9 +942,6 @@ static int msm_core_params_init(struct platform_device *pdev)
 		ret = msm_core_tsens_init(ea_node, cpu);
 		if (ret)
 			return ret;
-#else
-		activity[cpu].temp = DEFAULT_TEMP;
-#endif
 
 		if (!activity[cpu].sp->table)
 			continue;
@@ -1051,18 +1037,15 @@ static int uio_init(struct platform_device *pdev)
 static int msm_core_dev_probe(struct platform_device *pdev)
 {
 	int ret = 0;
-#ifdef ENABLE_TSENS_SAMPLING
 	char *key = NULL;
 	struct device_node *node;
 	int cpu;
-#endif
 	struct uio_info *info;
 
 	if (!pdev)
 		return -ENODEV;
 
 	msm_core_pdev = pdev;
-#ifdef ENABLE_TSENS_SAMPLING
 	node = pdev->dev.of_node;
 	if (!node)
 		return -ENODEV;
@@ -1084,7 +1067,6 @@ static int msm_core_dev_probe(struct platform_device *pdev)
 
 	key = "qcom,throttling-temp";
 	ret = of_property_read_u32(node, key, &max_throttling_temp);
-#endif
 
 	ret = uio_init(pdev);
 	if (ret)
@@ -1104,7 +1086,7 @@ static int msm_core_dev_probe(struct platform_device *pdev)
 	if (ret)
 		goto failed;
 
-#ifdef ENABLE_TSENS_SAMPLING
+	INIT_DELAYED_WORK(&sampling_work, samplequeue_handle);
 	ret = msm_core_task_init(&pdev->dev);
 	if (ret)
 		goto failed;
@@ -1112,11 +1094,10 @@ static int msm_core_dev_probe(struct platform_device *pdev)
 	for_each_possible_cpu(cpu)
 		set_threshold(&activity[cpu]);
 
-	INIT_DEFERRABLE_WORK(&sampling_work, samplequeue_handle);
-	schedule_delayed_work(&sampling_work, msecs_to_jiffies(0));
-	pm_notifier(system_suspend_handler, 0);
-#endif
+	schedule_sampling();
+
 	cpufreq_register_notifier(&cpu_policy, CPUFREQ_POLICY_NOTIFIER);
+	pm_notifier(system_suspend_handler, 0);
 	return 0;
 failed:
 	info = dev_get_drvdata(&pdev->dev);
@@ -1127,14 +1108,11 @@ failed:
 
 static int msm_core_remove(struct platform_device *pdev)
 {
-#ifdef ENABLE_TSENS_SAMPLING
 	int cpu;
-#endif
 	struct uio_info *info = dev_get_drvdata(&pdev->dev);
 
 	uio_unregister_device(info);
 
-#ifdef ENABLE_TSENS_SAMPLING
 	for_each_possible_cpu(cpu) {
 		if (activity[cpu].sensor_id < 0)
 			continue;
@@ -1144,7 +1122,6 @@ static int msm_core_remove(struct platform_device *pdev)
 		sensor_cancel_trip(activity[cpu].sensor_id,
 				&activity[cpu].low_threshold);
 	}
-#endif
 	free_dyn_memory();
 	misc_deregister(&msm_core_device);
 	return 0;
