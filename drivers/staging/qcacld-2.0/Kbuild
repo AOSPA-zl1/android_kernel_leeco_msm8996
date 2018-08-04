@@ -44,7 +44,6 @@ ifeq ($(KERNEL_BUILD), 0)
 	CONFIG_QCOM_LTE_COEX := y
 	endif
 
-ifndef CONFIG_MACH_LEECO
 	# As per target team, build is done as follows:
 	# Defconfig : build with default flags
 	# Slub      : defconfig  + CONFIG_SLUB_DEBUG=y +
@@ -69,7 +68,6 @@ ifndef CONFIG_MACH_LEECO
 			endif
 		endif
 	endif
-endif
 
 	#Flag to enable Legacy Fast Roaming3(LFR3)
 	CONFIG_QCACLD_WLAN_LFR3 := y
@@ -167,12 +165,7 @@ endif
 # Feature flags which are not (currently) configurable via Kconfig
 
 #Whether to build debug version
-
-ifdef CONFIG_MACH_LEECO
-BUILD_DEBUG_VERSION := 0
-else
 BUILD_DEBUG_VERSION := 1
-endif
 
 #Enable this flag to build driver in diag version
 BUILD_DIAG_VERSION := 1
@@ -1579,16 +1572,12 @@ endif
 
 KBUILD_CPPFLAGS += $(CDEFINES)
 
-ifdef CONFIG_MACH_LEECO
-EXTRA_CFLAGS += -Wno-unused-function -Wno-unused-variable
-else
 # Currently, for versions of gcc which support it, the kernel Makefile
 # is disabling the maybe-uninitialized warning.  Re-enable it for the
 # WLAN driver.  Note that we must use EXTRA_CFLAGS here so that it
 # will override the kernel settings.
 ifeq ($(call cc-option-yn, -Wmaybe-uninitialized),y)
 EXTRA_CFLAGS += -Wmaybe-uninitialized
-endif
 endif
 
 # If the module name is not "wlan", then the define MULTI_IF_NAME to be the
