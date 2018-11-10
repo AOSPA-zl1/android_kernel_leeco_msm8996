@@ -1948,6 +1948,7 @@
 		vbus_dwc3-supply = <&smbcharger_charger_otg>;
 		/* qcom,detect-dpdm-floating; */
 		qcom,vbus_set_by_cclogic;
+		qcom,no-wakeup-src-in-hostmode;
 		qcom,usb-dbm = <&dbm_1p5>;
 		qcom,msm-bus,name = "usb3";
 		qcom,msm-bus,num-cases = <2>;
